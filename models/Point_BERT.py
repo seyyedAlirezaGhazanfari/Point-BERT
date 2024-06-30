@@ -99,7 +99,6 @@ class TransformerEncoder(nn.Module):
             x = block(x + pos)
         return x
 
-
 @MODELS.register_module()
 class PointTransformer(nn.Module):
     def __init__(self, config, **kwargs):
@@ -107,28 +106,20 @@ class PointTransformer(nn.Module):
         self.config = config
 
         self.trans_dim = config.trans_dim
-        self.depth = config.depth
-        self.drop_path_rate = config.drop_path_rate
-        self.cls_dim = config.cls_dim
-        self.num_heads = config.num_heads
+        self.depth = config.depth 
+        self.drop_path_rate = config.drop_path_rate 
+        self.cls_dim = config.cls_dim 
+        self.num_heads = config.num_heads 
 
         self.group_size = config.group_size
         self.num_group = config.num_group
-        
-        # Convolutional layers for initial processing
-        self.conv1 = nn.Conv1d(3, 64, kernel_size=1)
-        self.conv2 = nn.Conv1d(64, 128, kernel_size=1)
-        self.conv3 = nn.Conv1d(128, self.trans_dim, kernel_size=1)
-        
-        # Group divider
-        self.group_divider = Group(num_group=self.num_group, group_size=self.group_size)
-        
-        # Define the encoder
-        self.encoder_dims = config.encoder_dims
-        self.encoder = Encoder(encoder_channel=self.encoder_dims)
-        
-        # Bridge encoder and transformer
-        self.reduce_dim = nn.Linear(self.encoder_dims, self.trans_dim)
+        # grouper
+        self.group_divider = Group(num_group = self.num_group, group_size = self.group_size)
+        # define the encoder
+        self.encoder_dims =  config.encoder_dims
+        self.encoder = Encoder(encoder_channel = self.encoder_dims)
+        # bridge encoder and transformer
+        self.reduce_dim = nn.Linear(self.encoder_dims,  self.trans_dim)
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, self.trans_dim))
         self.cls_pos = nn.Parameter(torch.randn(1, 1, self.trans_dim))
@@ -137,14 +128,14 @@ class PointTransformer(nn.Module):
             nn.Linear(3, 128),
             nn.GELU(),
             nn.Linear(128, self.trans_dim)
-        )
+        )  
 
         dpr = [x.item() for x in torch.linspace(0, self.drop_path_rate, self.depth)]
         self.blocks = TransformerEncoder(
-            embed_dim=self.trans_dim,
-            depth=self.depth,
-            drop_path_rate=dpr,
-            num_heads=self.num_heads
+            embed_dim = self.trans_dim,
+            depth = self.depth,
+            drop_path_rate = dpr,
+            num_heads = self.num_heads
         )
 
         self.norm = nn.LayerNorm(self.trans_dim)
@@ -157,11 +148,12 @@ class PointTransformer(nn.Module):
         )
 
         self.build_loss_func()
-
+        
     def build_loss_func(self):
         self.loss_ce = nn.CrossEntropyLoss()
-
+    
     def get_loss_acc(self, pred, gt, smoothing=True):
+        # import pdb; pdb.set_trace()
         gt = gt.contiguous().view(-1).long()
 
         if smoothing:
@@ -181,6 +173,7 @@ class PointTransformer(nn.Module):
 
         return loss, acc * 100
 
+
     def load_model_from_ckpt(self, bert_ckpt_path):
         ckpt = torch.load(bert_ckpt_path)
         base_ckpt = {k.replace("module.", ""): v for k, v in ckpt['base_model'].items()}
@@ -191,51 +184,43 @@ class PointTransformer(nn.Module):
                 base_ckpt[k[len('base_model.'):]] = base_ckpt[k]
             del base_ckpt[k]
 
+
         incompatible = self.load_state_dict(base_ckpt, strict=False)
 
         if incompatible.missing_keys:
-            print_log('missing_keys', logger='Transformer')
+            print_log('missing_keys', logger = 'Transformer')
             print_log(
                 get_missing_parameters_message(incompatible.missing_keys),
-                logger='Transformer'
+                logger = 'Transformer'
             )
         if incompatible.unexpected_keys:
-            print_log('unexpected_keys', logger='Transformer')
+            print_log('unexpected_keys', logger = 'Transformer')
             print_log(
                 get_unexpected_parameters_message(incompatible.unexpected_keys),
-                logger='Transformer'
+                logger = 'Transformer'
             )
 
-        print_log(f'[Transformer] Successful Loading the ckpt from {bert_ckpt_path}', logger='Transformer')
+        print_log(f'[Transformer] Successful Loading the ckpt from {bert_ckpt_path}', logger = 'Transformer')
+
 
     def forward(self, pts):
-        # Initial convolutional layers
-        pts = pts.permute(0, 2, 1)  # (B, 3, N)
-        pts = F.relu(self.conv1(pts))
-        pts = F.relu(self.conv2(pts))
-        pts = self.conv3(pts)
-        pts = pts.permute(0, 2, 1)  # (B, N, trans_dim)
-
-        # Group and encode
+        # divide the point clo  ud in the same form. This is important
         neighborhood, center = self.group_divider(pts)
-        group_input_tokens = self.encoder(neighborhood)
+        # encoder the input cloud blocks
+        group_input_tokens = self.encoder(neighborhood)  #  B G N
         group_input_tokens = self.reduce_dim(group_input_tokens)
-
-        # Prepare cls tokens and positional embeddings
-        cls_tokens = self.cls_token.expand(group_input_tokens.size(0), -1, -1)
-        cls_pos = self.cls_pos.expand(group_input_tokens.size(0), -1, -1)
+        # prepare cls
+        cls_tokens = self.cls_token.expand(group_input_tokens.size(0), -1, -1)  
+        cls_pos = self.cls_pos.expand(group_input_tokens.size(0), -1, -1)  
+        # add pos embedding
         pos = self.pos_embed(center)
-
-        # Combine tokens and positions
+        # final input
         x = torch.cat((cls_tokens, group_input_tokens), dim=1)
         pos = torch.cat((cls_pos, pos), dim=1)
-
-        # Transformer blocks with residual connections
-        for blk in self.blocks:
-            x = blk(x, pos) + x
-
+        # transformer
+        x = self.blocks(x, pos)
         x = self.norm(x)
-        concat_f = torch.cat([x[:, 0], x[:, 1:].max(1)[0]], dim=-1)
+        concat_f = torch.cat([x[:,0], x[:, 1:].max(1)[0]], dim = -1)
         ret = self.cls_head_finetune(concat_f)
         return ret
 
