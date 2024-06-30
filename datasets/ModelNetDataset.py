@@ -16,6 +16,32 @@ import torch
 
 warnings.filterwarnings('ignore')
 
+# data augmentation start
+
+def random_scale_point_cloud(point_cloud, scale_low=0.8, scale_high=1.25):
+    scale = np.random.uniform(scale_low, scale_high)
+    point_cloud[:, 0:3] *= scale
+    return point_cloud
+
+def random_rotate_point_cloud(point_cloud):
+    theta = np.random.uniform(0, 2 * np.pi)
+    rotation_matrix = np.array([[np.cos(theta), -np.sin(theta), 0],
+                                [np.sin(theta), np.cos(theta), 0],
+                                [0, 0, 1]])
+    point_cloud[:, 0:3] = point_cloud[:, 0:3].dot(rotation_matrix)
+    return point_cloud
+
+def jitter_point_cloud(point_cloud, sigma=0.01, clip=0.05):
+    jitter = np.clip(sigma * np.random.randn(*point_cloud[:, 0:3].shape), -clip, clip)
+    point_cloud[:, 0:3] += jitter
+    return point_cloud
+
+def translate_point_cloud(point_cloud, shift_range=0.1):
+    shift = np.random.uniform(-shift_range, shift_range, 3)
+    point_cloud[:, 0:3] += shift
+    return point_cloud
+
+# data augmentation end
 
 def pc_normalize(pc):
     centroid = np.mean(pc, axis=0)
@@ -58,7 +84,6 @@ class ModelNet(Dataset):
         self.num_category = config.NUM_CATEGORY
         self.process_data = True
         self.uniform = True
-        split = config.subset
         self.subset = config.subset
 
         if self.num_category == 10:
@@ -138,12 +163,16 @@ class ModelNet(Dataset):
 
         return point_set, label[0]
 
-
     def __getitem__(self, index):
         points, label = self._get_item(index)
         pt_idxs = np.arange(0, points.shape[0])   # 2048
         if self.subset == 'train':
             np.random.shuffle(pt_idxs)
+            # Apply data augmentation
+            points = random_scale_point_cloud(points)
+            points = random_rotate_point_cloud(points)
+            points = jitter_point_cloud(points)
+            points = translate_point_cloud(points)
         current_points = points[pt_idxs].copy()
         current_points = torch.from_numpy(current_points).float()
         return 'ModelNet', 'sample', (current_points, label)
