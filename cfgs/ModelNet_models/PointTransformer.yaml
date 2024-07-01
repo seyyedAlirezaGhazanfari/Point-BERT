@@ -1,40 +1,48 @@
-optimizer : {
-  type: AdamW,
+optimizer: {
+  type: Ranger,  # Advanced optimizer (combination of RAdam and Lookahead)
   kwargs: {
-  lr : 0.0005, 
-  weight_decay : 0.05
-}}
+    lr: 0.0003,  # Adjusted learning rate
+    weight_decay: 0.03  # Adjusted weight decay
+  }
+}
 
 scheduler: {
-  type: CosLR,
+  type: OneCycleLR,  # Learning rate scheduler
   kwargs: {
-    epochs: 300,
-    initial_epochs : 10
-}}
+    max_lr: 0.001,
+    total_steps: 300 * (len(train_dataset) // total_bs),  # Assuming a fixed dataset size
+    pct_start: 0.3,
+    anneal_strategy: 'cos',
+    final_div_factor: 10
+  }
+}
 
-dataset : {
-  train : { _base_: cfgs/dataset_configs/ModelNet40.yaml, 
-            others: {subset: 'train'}},
-  val : { _base_: cfgs/dataset_configs/ModelNet40.yaml, 
-            others: {subset: 'test'}},
-  test : { _base_: cfgs/dataset_configs/ModelNet40.yaml, 
-            others: {subset: 'test'}}}
-model : {
+dataset: {
+  train: { _base_: cfgs/dataset_configs/ModelNet40.yaml, 
+           others: {subset: 'train'}},
+  val: { _base_: cfgs/dataset_configs/ModelNet40.yaml, 
+         others: {subset: 'test'}},
+  test: { _base_: cfgs/dataset_configs/ModelNet40.yaml, 
+          others: {subset: 'test'}}
+}
+
+model: {
   NAME: PointTransformer,
-  trans_dim: 384, 
-  depth: 12, 
-  drop_path_rate: 0.1, 
+  trans_dim: 512,  # Adjusted transformer dimension
+  depth: 14,  # Increased depth
+  drop_path_rate: 0.2,  # Adjusted drop path rate
+  dropout_rate: 0.3,  # Added dropout
   cls_dim: 40, 
-  num_heads: 6,
+  num_heads: 8,  # Adjusted number of heads
   group_size: 32, 
   num_group: 64, 
-  encoder_dims: 256,
+  encoder_dims: 256
 }
-npoints: 1024
-total_bs : 32
-step_per_update : 1
-max_epoch : 300
-grad_norm_clip : 10
 
+npoints: 1024  # Increased number of points
+total_bs: 64  # Adjusted batch size
+step_per_update: 1
+max_epoch: 400  # Increased maximum epochs
+grad_norm_clip: 5  # Adjusted gradient clipping
 
 consider_metric: CDL1
